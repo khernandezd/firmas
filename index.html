@@ -1019,7 +1019,14 @@
                 const pdf = await window.pdfjsLib.getDocument({ data: bytes }).promise;
                 pdfViewerContainer.innerHTML = '';
                 pdfPageLayers = [];
-                const availableWidth = Math.max(pdfViewerContainer.clientWidth, 1);
+                let availableWidth = pdfViewerContainer.getBoundingClientRect().width || docWrapper.getBoundingClientRect().width || docWrapper.clientWidth || 0;
+                if (availableWidth < 100) {
+                    await new Promise(resolve => requestAnimationFrame(resolve));
+                    availableWidth = pdfViewerContainer.getBoundingClientRect().width || docWrapper.getBoundingClientRect().width || docWrapper.clientWidth || 0;
+                }
+                if (availableWidth < 100) {
+                    availableWidth = 794;
+                }
                 for (let n = 1; n <= pdf.numPages; n++) {
                     const page = await pdf.getPage(n);
                     const baseViewport = page.getViewport({ scale: 1 });
