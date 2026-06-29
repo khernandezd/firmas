@@ -85,6 +85,13 @@
             margin-bottom: 120px;
         }
 
+        .a4-page.pdf-mode {
+            min-height: auto;
+            padding: 0;
+            background: transparent;
+            box-shadow: none;
+        }
+
         /* Signature drag */
         #draggable-signature {
             position: absolute;
@@ -1034,22 +1041,36 @@
                     const viewport = page.getViewport({ scale: pageScale });
                     const renderWidth = Math.round(viewport.width);
                     const renderHeight = Math.round(viewport.height);
+                    
+                    const ratio = Math.max(window.devicePixelRatio || 1, 1);
+                    
                     const shell = document.createElement('div');
                     shell.className = 'pdf-page-shell';
                     shell.dataset.page = String(n);
                     shell.style.width = `${renderWidth}px`;
                     shell.style.height = `${renderHeight}px`;
+                    
                     const canvas = document.createElement('canvas');
                     canvas.className = 'pdf-page-canvas';
-                    canvas.width = renderWidth;
-                    canvas.height = renderHeight;
+                    
+                    // High-DPI canvas rendering
+                    canvas.width = renderWidth * ratio;
+                    canvas.height = renderHeight * ratio;
                     canvas.style.width = `${renderWidth}px`;
                     canvas.style.height = `${renderHeight}px`;
+                    
                     const ctx = canvas.getContext('2d');
+                    
                     const signatureLayer = document.createElement('div');
                     signatureLayer.className = 'signature-layer';
                     signatureLayer.dataset.page = String(n);
-                    await page.render({ canvasContext: ctx, viewport }).promise;
+                    
+                    await page.render({ 
+                        canvasContext: ctx, 
+                        viewport: viewport,
+                        transform: [ratio, 0, 0, ratio, 0, 0]
+                    }).promise;
+                    
                     shell.appendChild(canvas);
                     shell.appendChild(signatureLayer);
                     pdfViewerContainer.appendChild(shell);
@@ -1376,12 +1397,19 @@
                         docContent.classList.add('hidden');
                         htmlSource.classList.add('hidden');
                         pdfViewerContainer.classList.remove('hidden');
+                        
+                        // Apply pdf-mode to a4-page
+                        document.querySelector('.a4-page')?.classList.add('pdf-mode');
+
                         renderPdfToDOM(currentDocData.content);
                     } else {
                         currentCreationMode = 'html';
                         pdfViewerContainer.classList.add('hidden');
                         docContent.classList.remove('hidden');
                         docContent.innerHTML = currentDocData.content;
+
+                        // Remove pdf-mode from a4-page
+                        document.querySelector('.a4-page')?.classList.remove('pdf-mode');
                     }
                     renderPlacedSignatures(currentSignatures);
                     setBottomBarState('default');
