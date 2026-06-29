@@ -831,7 +831,7 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, collection, addDoc, getDoc, doc, onSnapshot, updateDoc, arrayUnion, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getFirestore, collection, addDoc, getDoc, getDocs, doc, onSnapshot, setDoc, updateDoc, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         // Mostrar pantalla correcta de inmediato sin esperar a Firebase
         const urlParamsInitial = new URLSearchParams(window.location.search);
@@ -935,6 +935,9 @@
         let pdfResizeRaf = null;
         let activePdfSignature = null;
         let activeSignaturePointer = null;
+        let currentSignatures = [];
+        let unsubscribeDocSignatures = null;
+        let unsubscribeDashboard = null;
 
         const defaultTemplateHtml = `<h1 style="text-align:center;"><strong>TÍTULO DEL DOCUMENTO</strong></h1><p><br></p><p>Fecha: ______ de ______________ de 20__</p><p><br></p><p>Por la presente, el suscrito declara que…</p><p><em>(Borra este texto y redacta el contenido del documento)</em></p>`;
 
@@ -952,6 +955,10 @@
                 authAnonBtn.classList.remove('hidden');
                 authAnonBtn.style.display = 'inline-flex';
             }
+        }
+
+        function currentUserHasSigned() {
+            return !!(currentUser && currentSignatures.some(sig => sig.userId === currentUser.uid));
         }
 
         // Heading select
@@ -1039,7 +1046,7 @@
                     pdfViewerContainer.appendChild(shell);
                     pdfPageLayers.push(signatureLayer);
                 }
-                renderPlacedSignatures(currentDocData?.signatures || []);
+                renderPlacedSignatures(currentSignatures);
                 renderActivePdfSignature();
             } catch (err) {
                 console.error(err);
@@ -1144,7 +1151,8 @@
 
             const isAuthor = currentUser && currentUser.uid === currentDocData.authorId;
             const isDocClosed = currentDocData.status === 'closed';
-            const sigCount = (currentDocData.signatures || []).length;
+            const sigCount = currentSignatures.length;
+            const hasSigned = currentUserHasSigned();
 
             // Always show sig count for viewer mode
             if (isDocumentShared && sigCount >= 0) {
@@ -1161,10 +1169,15 @@
                     barStateSave.classList.remove('hidden');
                     barStateSave.style.display = 'flex';
                     barStateInfo.classList.remove('hidden');
-                    barStateInfo.textContent = 'Arrastra la firma a tu posición preferida y presiona Guardar.';
+                    barStateInfo.textContent = hasSigned
+                        ? 'Ya firmaste este documento. Puedes reemplazar tu firma actual.'
+                        : 'Arrastra la firma a tu posición preferida y presiona Guardar.';
                 } else {
-                    // Doc abierto: mostrar botón de firma a todos
                     btnStartSign.classList.remove('hidden');
+                    if (hasSigned) {
+                        barStateInfo.classList.remove('hidden');
+                        barStateInfo.textContent = 'Ya firmaste este documento. Puedes reemplazar tu firma si lo necesitas.';
+                    }
                     // Mostrar "Finalizar" al autor aunque esté en modo visor
                     if (isAuthor) {
                         btnCloseDocument.classList.remove('hidden');
@@ -1325,6 +1338,21 @@
         function loadDocumentRealtime(docId) {
             if (!db) return;
             const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'shared_docs', docId);
+            if (unsubscribeDocSignatures) unsubscribeDocSignatures();
+
+            const signaturesRef = collection(db, 'artifacts', appId, 'public', 'data', 'shared_docs', docId, 'signatures');
+            unsubscribeDocSignatures = onSnapshot(signaturesRef, (signaturesSnap) => {
+                currentSignatures = signaturesSnap.docs
+                    .map(sigDoc => ({ id: sigDoc.id, ...sigDoc.data() }))
+                    .sort((left, right) => {
+                        const leftTs = left.timestamp || '';
+                        const rightTs = right.timestamp || '';
+                        return leftTs.localeCompare(rightTs);
+                    });
+                renderPlacedSignatures(currentSignatures);
+                setBottomBarState('default');
+            });
+
             onSnapshot(docRef, (docSnap) => {
                 document.getElementById('global-loader').classList.add('hidden');
                 document.getElementById('global-loader').style.display = 'none';
@@ -1346,9 +1374,15 @@
                         docContent.classList.remove('hidden');
                         docContent.innerHTML = currentDocData.content;
                     }
-                    renderPlacedSignatures(currentDocData.signatures || []);
+                    renderPlacedSignatures(currentSignatures);
                     setBottomBarState('default');
                 } else {
+                    if (unsubscribeDocSignatures) {
+                        unsubscribeDocSignatures();
+                        unsubscribeDocSignatures = null;
+                    }
+                    currentSignatures = [];
+                    renderPlacedSignatures(currentSignatures);
                     docContent.innerHTML = '<p style="color:var(--danger);text-align:center;margin-top:48px;font-family:Inter,sans-serif;">Documento no encontrado o eliminado.</p>';
                     setBottomBarState('default');
                 }
@@ -1383,14 +1417,22 @@
         function loadDashboard() {
             if (!db || !currentUser) return;
             const docsRef = collection(db, 'artifacts', appId, 'public', 'data', 'shared_docs');
-            onSnapshot(docsRef, (snapshot) => {
+            if (unsubscribeDashboard) unsubscribeDashboard();
+            unsubscribeDashboard = onSnapshot(docsRef, async (snapshot) => {
                 dashboardList.innerHTML = '';
                 let hasDocs = false;
+                const signaturesByDoc = new Map(await Promise.all(snapshot.docs.map(async (docSnap) => {
+                    const sigsRef = collection(db, 'artifacts', appId, 'public', 'data', 'shared_docs', docSnap.id, 'signatures');
+                    const sigsSnap = await getDocs(sigsRef);
+                    return [docSnap.id, sigsSnap.docs.map(sigDoc => ({ id: sigDoc.id, ...sigDoc.data() }))];
+                })));
+
                 snapshot.forEach(docSnap => {
                     const data = docSnap.data();
                     const id = docSnap.id;
+                    const signatures = signaturesByDoc.get(id) || [];
                     const isAuthor = data.authorId === currentUser.uid;
-                    const hasSigned = data.signatures && data.signatures.some(s => s.userId === currentUser.uid);
+                    const hasSigned = signatures.some(sig => sig.userId === currentUser.uid);
                     if (isAuthor || hasSigned) {
                         hasDocs = true;
                         let title = "Documento PDF";
@@ -1401,7 +1443,7 @@
                             title = el ? el.innerText.substring(0, 60) : 'Documento de texto';
                         }
                         const dateStr = new Date(data.createdAt).toLocaleDateString('es', { day:'2-digit', month:'short', year:'numeric' });
-                        const sigCount = data.signatures ? data.signatures.length : 0;
+                        const sigCount = signatures.length;
                         const isClosed = data.status === 'closed';
 
                         const div = document.createElement('div');
@@ -1468,6 +1510,9 @@
                     return;
                 }
 
+                const sigsRef = collection(db, 'artifacts', appId, 'public', 'data', 'shared_docs', docId, 'signatures');
+                const sigsSnap = await getDocs(sigsRef);
+                await Promise.all(sigsSnap.docs.map(sigDoc => deleteDoc(sigDoc.ref)));
                 await deleteDoc(docRef);
                 window.showToast('Documento eliminado');
             } catch (error) {
@@ -1745,14 +1790,14 @@
                         userId: currentUser.uid,
                         timestamp: new Date().toISOString()
                     };
-                const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'shared_docs', currentDocId);
-                await updateDoc(docRef, { signatures: arrayUnion(sigData) });
+                const signatureRef = doc(db, 'artifacts', appId, 'public', 'data', 'shared_docs', currentDocId, 'signatures', currentUser.uid);
+                await setDoc(signatureRef, sigData);
                 dragSig.style.display = 'none';
                 activePdfSignature = null;
                 ctxSig.clearRect(0, 0, canvasSig.width, canvasSig.height);
                 hasSignature = false;
                 setBottomBarState('default');
-                window.showToast('✓ Firma guardada correctamente');
+                window.showToast(currentUserHasSigned() ? '✓ Firma actualizada correctamente' : '✓ Firma guardada correctamente');
             } catch (e) {
                 console.error(e);
                 window.showError("Error al guardar la firma. Intenta de nuevo.");
@@ -1784,7 +1829,6 @@
                     content: docContentData,
                     authorId: currentUser.uid,
                     status: 'open',
-                    signatures: [],
                     createdAt: new Date().toISOString()
                 });
                 const appUrl = new URL(window.location.href.split('?')[0]);
@@ -1833,7 +1877,7 @@
 
                     const pdfDoc = await window.PDFLib.PDFDocument.load(bytes);
                     const embedCache = new Map();
-                    const signaturesByPage = (currentDocData.signatures || []).reduce((acc, sig) => {
+                    const signaturesByPage = currentSignatures.reduce((acc, sig) => {
                         const pageIndex = Number(sig.page) - 1;
                         if (pageIndex < 0) return acc;
                         (acc[pageIndex] ||= []).push(sig);
