@@ -140,14 +140,11 @@
 
         .pdf-page-shell {
             position: relative;
-            width: 100%;
             margin-bottom: 8px;
         }
 
         .pdf-page-canvas {
             display: block;
-            width: 100%;
-            height: auto;
             border-radius: 2px;
         }
 
@@ -1028,19 +1025,24 @@
                     const baseViewport = page.getViewport({ scale: 1 });
                     const pageScale = availableWidth / baseViewport.width;
                     const viewport = page.getViewport({ scale: pageScale });
+                    const renderWidth = Math.round(viewport.width);
+                    const renderHeight = Math.round(viewport.height);
                     const shell = document.createElement('div');
                     shell.className = 'pdf-page-shell';
                     shell.dataset.page = String(n);
-                    shell.style.height = `${viewport.height}px`;
+                    shell.style.width = `${renderWidth}px`;
+                    shell.style.height = `${renderHeight}px`;
                     const canvas = document.createElement('canvas');
                     canvas.className = 'pdf-page-canvas';
-                    canvas.width = viewport.width;
-                    canvas.height = viewport.height;
+                    canvas.width = renderWidth;
+                    canvas.height = renderHeight;
+                    canvas.style.width = `${renderWidth}px`;
+                    canvas.style.height = `${renderHeight}px`;
                     const ctx = canvas.getContext('2d');
                     const signatureLayer = document.createElement('div');
                     signatureLayer.className = 'signature-layer';
                     signatureLayer.dataset.page = String(n);
-                    await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+                    await page.render({ canvasContext: ctx, viewport }).promise;
                     shell.appendChild(canvas);
                     shell.appendChild(signatureLayer);
                     pdfViewerContainer.appendChild(shell);
