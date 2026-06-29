@@ -609,7 +609,7 @@
                     <svg width="26" height="26" fill="none" stroke="white" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
                 </div>
                 <h2 id="auth-title" style="font-size:20px;font-weight:600;margin:0 0 4px;">Bienvenido</h2>
-                <p style="font-size:12px;color:var(--text-muted);margin:0;">Acceso para creadores de documentos</p>
+                <p id="auth-subtitle" style="font-size:12px;color:var(--text-muted);margin:0;">Acceso para creadores de documentos</p>
             </div>
 
             <form id="auth-form" style="display:flex;flex-direction:column;gap:12px;">
@@ -873,6 +873,7 @@
         const authSubmit = document.getElementById('auth-submit');
         const authToggleBtn = document.getElementById('auth-toggle-btn');
         const authTitle = document.getElementById('auth-title');
+        const authSubtitle = document.getElementById('auth-subtitle');
         const authToggleText = document.getElementById('auth-toggle-text');
         const logoutBtn = document.getElementById('logout-btn');
         const authAnonBtn = document.getElementById('auth-anon-btn');
@@ -936,6 +937,22 @@
         let activeSignaturePointer = null;
 
         const defaultTemplateHtml = `<h1 style="text-align:center;"><strong>TÍTULO DEL DOCUMENTO</strong></h1><p><br></p><p>Fecha: ______ de ______________ de 20__</p><p><br></p><p>Por la presente, el suscrito declara que…</p><p><em>(Borra este texto y redacta el contenido del documento)</em></p>`;
+
+        function updateAuthScreenContent() {
+            if (isDocumentShared) {
+                authTitle.textContent = isLoginMode ? 'Accede al documento' : 'Crear cuenta';
+                authSubtitle.textContent = isLoginMode
+                    ? 'Inicia sesión con tu cuenta para entrar como propietario. Si solo vas a firmar, usa el acceso de invitado.'
+                    : 'Crea una cuenta para gestionar tus propios documentos.';
+                authAnonBtn.classList.remove('hidden');
+                authAnonBtn.style.display = 'inline-flex';
+            } else {
+                authTitle.textContent = isLoginMode ? 'Bienvenido' : 'Crear cuenta';
+                authSubtitle.textContent = 'Acceso para creadores de documentos';
+                authAnonBtn.classList.remove('hidden');
+                authAnonBtn.style.display = 'inline-flex';
+            }
+        }
 
         // Heading select
         headingSelect?.addEventListener('change', () => {
@@ -1165,6 +1182,7 @@
             loader.classList.add('hidden');
             document.getElementById('app-wrapper').classList.add('hidden');
             const aw = document.getElementById('auth-wrapper');
+            updateAuthScreenContent();
             aw.style.display = 'flex';
             aw.classList.remove('hidden');
         }
@@ -1202,8 +1220,6 @@
                 const initAuth = async () => {
                     if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
                         await signInWithCustomToken(auth, __initial_auth_token);
-                    } else if (isDocumentShared) {
-                        if (!auth.currentUser) await signInAnonymously(auth);
                     }
                 };
                 initAuth().catch(console.error);
@@ -1213,16 +1229,20 @@
                     currentUser = user;
 
                     if (isDocumentShared) {
-                        // Modo visor/firmante
-                        authWrapper.classList.add('hidden');
-                        authWrapper.style.display = 'none';
-                        sidebarCreator.classList.add('hidden');
-                        sidebarCreator.style.display = 'none';
-                        dashboardView.classList.add('hidden');
-                        docContent.setAttribute('contenteditable', 'false');
-                        appWrapper.classList.remove('hidden');
-                        appWrapper.style.display = 'flex';
-                        loadDocumentRealtime(currentDocId);
+                        if (user) {
+                            // Modo visor/firmante autenticado o invitado
+                            authWrapper.classList.add('hidden');
+                            authWrapper.style.display = 'none';
+                            sidebarCreator.classList.add('hidden');
+                            sidebarCreator.style.display = 'none';
+                            dashboardView.classList.add('hidden');
+                            docContent.setAttribute('contenteditable', 'false');
+                            appWrapper.classList.remove('hidden');
+                            appWrapper.style.display = 'flex';
+                            loadDocumentRealtime(currentDocId);
+                        } else {
+                            showAuthScreen();
+                        }
                     } else {
                         // Modo creador
                         loader.style.display = 'none';
@@ -1293,10 +1313,10 @@
         authToggleBtn.addEventListener('click', (e) => {
             e.preventDefault();
             isLoginMode = !isLoginMode;
-            authTitle.textContent = isLoginMode ? 'Bienvenido' : 'Crear cuenta';
             authSubmit.textContent = isLoginMode ? 'Entrar' : 'Registrarse';
             authToggleText.textContent = isLoginMode ? '¿No tienes cuenta?' : '¿Ya tienes cuenta?';
             authToggleBtn.textContent = isLoginMode ? 'Regístrate' : 'Inicia sesión';
+            updateAuthScreenContent();
         });
 
         logoutBtn?.addEventListener('click', async () => await signOut(auth));
