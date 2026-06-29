@@ -1,0 +1,1847 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>DocuFirma — Firma de documentos</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2pdf.js/0.10.1/html2pdf.bundle.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf-lib/1.17.1/pdf-lib.min.js"></script>
+    <script>
+        window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
+    </script>
+
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600&display=swap');
+
+        *, *::before, *::after { box-sizing: border-box; }
+
+        :root {
+            --brand: #2563EB;
+            --brand-dark: #1d4ed8;
+            --brand-light: #eff6ff;
+            --brand-muted: #bfdbfe;
+            --success: #059669;
+            --success-bg: #ecfdf5;
+            --danger: #dc2626;
+            --danger-bg: #fef2f2;
+            --warning: #d97706;
+            --warning-bg: #fffbeb;
+            --surface: #ffffff;
+            --surface-raised: #f8fafc;
+            --border: #e2e8f0;
+            --border-strong: #cbd5e1;
+            --text: #0f172a;
+            --text-secondary: #475569;
+            --text-muted: #94a3b8;
+            --radius-sm: 6px;
+            --radius: 10px;
+            --radius-lg: 14px;
+            --shadow-sm: 0 1px 2px rgba(0,0,0,0.05);
+            --shadow: 0 4px 6px -1px rgba(0,0,0,0.07), 0 2px 4px -2px rgba(0,0,0,0.05);
+            --shadow-lg: 0 10px 15px -3px rgba(0,0,0,0.08), 0 4px 6px -4px rgba(0,0,0,0.05);
+        }
+
+        body {
+            font-family: 'Inter', system-ui, sans-serif;
+            font-size: 14px;
+            color: var(--text);
+            background: #f1f5f9;
+            margin: 0;
+            padding: 0;
+        }
+
+        /* Scrollbars */
+        ::-webkit-scrollbar { width: 5px; height: 5px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: var(--border-strong); border-radius: 99px; }
+        ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+
+        /* Signature pad */
+        #signature-pad { touch-action: none; cursor: crosshair; }
+        .signature-guide-line {
+            position: absolute;
+            bottom: 48px;
+            left: 16px;
+            right: 16px;
+            height: 1px;
+            background: var(--border);
+        }
+
+        /* Document page */
+        .a4-page {
+            width: min(794px, 100%);
+            min-height: 1123px;
+            background: white;
+            padding: clamp(24px, 6vw, 60px) clamp(20px, 7vw, 70px) 100px;
+            box-shadow: var(--shadow-lg), 0 0 0 1px rgba(0,0,0,0.04);
+            border-radius: 4px;
+            position: relative;
+            font-family: 'Times New Roman', Georgia, serif;
+            font-size: 13pt;
+            line-height: 1.6;
+            color: #1a1a1a;
+            margin-bottom: 120px;
+        }
+
+        /* Signature drag */
+        #draggable-signature {
+            position: absolute;
+            cursor: grab;
+            border: 1.5px dashed var(--brand);
+            background: rgba(37, 99, 235, 0.06);
+            border-radius: 4px;
+            touch-action: none;
+            display: none;
+            z-index: 50;
+            width: 160px;
+            transition: box-shadow 0.15s;
+        }
+        #draggable-signature:active { cursor: grabbing; box-shadow: 0 0 0 3px rgba(37,99,235,0.15); }
+        #draggable-signature::after {
+            content: "✦ Arrastra aquí";
+            position: absolute;
+            bottom: -22px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 10px;
+            color: var(--brand);
+            white-space: nowrap;
+            font-family: 'Inter', sans-serif;
+            font-weight: 500;
+        }
+
+        #document-content[contenteditable="true"] {
+            outline: none;
+            min-height: 500px;
+            border-radius: 2px;
+            transition: box-shadow 0.15s;
+        }
+        #document-content[contenteditable="true"]:focus {
+            box-shadow: inset 0 0 0 2px var(--brand-muted);
+        }
+
+        .viewer-container {
+            overflow-x: hidden;
+            overflow-y: auto;
+            -webkit-overflow-scrolling: touch;
+            padding: 24px 12px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        .a4-scale-wrapper {
+            width: 100%;
+            display: flex;
+            justify-content: center;
+            margin-bottom: 0;
+        }
+
+        .pdf-page-shell {
+            position: relative;
+            width: 100%;
+            margin-bottom: 8px;
+        }
+
+        .pdf-page-canvas {
+            display: block;
+            width: 100%;
+            height: auto;
+            border-radius: 2px;
+        }
+
+        .signature-layer {
+            position: absolute;
+            inset: 0;
+            z-index: 40;
+        }
+
+        /* UI Components */
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            padding: 8px 14px;
+            border-radius: var(--radius-sm);
+            font-size: 13px;
+            font-weight: 500;
+            font-family: 'Inter', sans-serif;
+            cursor: pointer;
+            transition: all 0.15s;
+            border: 1px solid transparent;
+            white-space: nowrap;
+        }
+        .btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .btn-primary { background: var(--brand); color: white; }
+        .btn-primary:not(:disabled):hover { background: var(--brand-dark); }
+        .btn-secondary { background: white; color: var(--text); border-color: var(--border-strong); }
+        .btn-secondary:not(:disabled):hover { background: var(--surface-raised); }
+        .btn-success { background: var(--success); color: white; }
+        .btn-success:not(:disabled):hover { background: #047857; }
+        .btn-danger { background: var(--danger); color: white; }
+        .btn-danger:not(:disabled):hover { background: #b91c1c; }
+        .btn-ghost { background: transparent; color: var(--text-secondary); }
+        .btn-ghost:not(:disabled):hover { background: var(--surface-raised); color: var(--text); }
+        .btn-lg { padding: 11px 20px; font-size: 14px; border-radius: var(--radius); }
+        .btn-full { width: 100%; }
+        .btn-icon { padding: 8px; border-radius: var(--radius-sm); }
+
+        .badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+            padding: 2px 8px;
+            border-radius: 99px;
+            font-size: 11px;
+            font-weight: 600;
+            letter-spacing: 0.02em;
+        }
+        .badge-blue { background: var(--brand-light); color: var(--brand-dark); }
+        .badge-green { background: var(--success-bg); color: var(--success); }
+        .badge-gray { background: #f1f5f9; color: var(--text-secondary); }
+        .badge-amber { background: var(--warning-bg); color: var(--warning); }
+        .badge-red { background: var(--danger-bg); color: var(--danger); }
+
+        /* Sidebar */
+        #sidebar-creator {
+            background: var(--surface);
+            border-right: 1px solid var(--border);
+            display: flex;
+            flex-direction: column;
+        }
+        .sidebar-header {
+            padding: 18px 20px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .logo {
+            display: flex;
+            align-items: center;
+            gap: 9px;
+        }
+        .logo-icon {
+            width: 32px;
+            height: 32px;
+            background: var(--brand);
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .logo-icon svg { width: 18px; height: 18px; color: white; }
+        .logo-text { font-size: 15px; font-weight: 600; color: var(--text); letter-spacing: -0.02em; }
+        .logo-subtitle { font-size: 11px; color: var(--text-muted); margin-top: 1px; }
+
+        .sidebar-tabs {
+            display: flex;
+            padding: 12px 16px 0;
+            gap: 4px;
+        }
+        .sidebar-tab {
+            flex: 1;
+            padding: 7px 10px;
+            border-radius: 7px 7px 0 0;
+            font-size: 12px;
+            font-weight: 500;
+            color: var(--text-muted);
+            background: transparent;
+            border: none;
+            cursor: pointer;
+            transition: all 0.15s;
+            border-bottom: 2px solid transparent;
+        }
+        .sidebar-tab.active { color: var(--brand); border-bottom-color: var(--brand); background: var(--brand-light); }
+        .sidebar-tab:not(.active):hover { color: var(--text-secondary); background: var(--surface-raised); }
+
+        .sidebar-body { padding: 16px 20px; flex: 1; overflow-y: auto; display: flex; flex-direction: column; gap: 20px; }
+
+        .section-label { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted); margin-bottom: 8px; }
+
+        .toggle-group {
+            display: flex;
+            background: var(--surface-raised);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+            padding: 3px;
+            gap: 2px;
+        }
+        .toggle-btn {
+            flex: 1;
+            padding: 6px 10px;
+            border-radius: 5px;
+            font-size: 12px;
+            font-weight: 500;
+            color: var(--text-muted);
+            background: transparent;
+            border: none;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        .toggle-btn.active { background: white; color: var(--brand); box-shadow: var(--shadow-sm); }
+        .toggle-btn:not(.active):hover { color: var(--text-secondary); }
+
+        /* Format toolbar */
+        .format-bar {
+            display: flex;
+            align-items: center;
+            gap: 1px;
+            padding: 4px;
+            background: var(--surface-raised);
+            border: 1px solid var(--border);
+            border-radius: var(--radius-sm);
+        }
+        .format-btn {
+            padding: 5px 7px;
+            border: none;
+            background: transparent;
+            border-radius: 4px;
+            color: var(--text-secondary);
+            cursor: pointer;
+            font-size: 12px;
+            font-weight: 600;
+            line-height: 1;
+            transition: all 0.1s;
+            min-width: 28px;
+        }
+        .format-btn:hover { background: white; color: var(--text); box-shadow: var(--shadow-sm); }
+        .format-btn.active { background: var(--brand-light); color: var(--brand); }
+        .format-sep { width: 1px; height: 18px; background: var(--border); margin: 0 3px; }
+
+        /* PDF upload zone */
+        .upload-zone {
+            border: 1.5px dashed var(--border-strong);
+            border-radius: var(--radius);
+            padding: 24px 16px;
+            text-align: center;
+            cursor: pointer;
+            transition: all 0.15s;
+            background: var(--surface-raised);
+        }
+        .upload-zone:hover { border-color: var(--brand); background: var(--brand-light); }
+        .upload-zone.has-file { border-color: var(--success); background: var(--success-bg); }
+        .upload-zone svg { width: 28px; height: 28px; margin: 0 auto 8px; }
+
+        /* Auth screen */
+        .auth-card {
+            background: white;
+            border-radius: var(--radius-lg);
+            box-shadow: var(--shadow-lg), 0 0 0 1px rgba(0,0,0,0.04);
+            padding: 32px;
+            width: 100%;
+            max-width: 380px;
+        }
+        .input-field {
+            width: 100%;
+            padding: 9px 12px;
+            border: 1px solid var(--border-strong);
+            border-radius: var(--radius-sm);
+            font-size: 14px;
+            font-family: 'Inter', sans-serif;
+            color: var(--text);
+            background: var(--surface-raised);
+            outline: none;
+            transition: border-color 0.15s, box-shadow 0.15s;
+        }
+        .input-field:focus {
+            border-color: var(--brand);
+            box-shadow: 0 0 0 3px rgba(37,99,235,0.1);
+            background: white;
+        }
+        .input-field::placeholder { color: var(--text-muted); }
+
+        /* Modal */
+        .modal-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(15, 23, 42, 0.5);
+            backdrop-filter: blur(4px);
+            z-index: 200;
+            display: flex;
+            align-items: flex-end;
+            justify-content: center;
+        }
+        @media (min-width: 768px) { .modal-overlay { align-items: center; } }
+        .modal-sheet {
+            background: white;
+            width: 100%;
+            border-radius: 20px 20px 0 0;
+            overflow: hidden;
+            max-height: 85vh;
+        }
+        @media (min-width: 768px) {
+            .modal-sheet { max-width: 440px; border-radius: var(--radius-lg); max-height: none; }
+        }
+        .modal-header {
+            padding: 16px 20px;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .modal-drag-handle {
+            width: 36px;
+            height: 4px;
+            background: var(--border-strong);
+            border-radius: 99px;
+            margin: 0 auto 12px;
+        }
+
+        /* Error modal */
+        #error-modal { z-index: 500; }
+        .error-card {
+            background: white;
+            border-radius: var(--radius-lg);
+            box-shadow: var(--shadow-lg);
+            padding: 24px;
+            max-width: 360px;
+            width: calc(100% - 32px);
+        }
+
+        /* Bottom bar */
+        #bottom-bar {
+            position: fixed;
+            bottom: 0;
+            left: 0;
+            right: 0;
+            background: white;
+            border-top: 1px solid var(--border);
+            padding: 12px 16px;
+            padding-bottom: max(12px, env(safe-area-inset-bottom));
+            z-index: 100;
+            transition: transform 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+            transform: translateY(100%);
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+        }
+        #bottom-bar.visible { transform: translateY(0); }
+
+        /* Signature info bar */
+        .sig-count-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 12px;
+            background: var(--surface-raised);
+            border: 1px solid var(--border);
+            border-radius: 99px;
+            font-size: 12px;
+            color: var(--text-secondary);
+        }
+
+        /* Dashboard */
+        .doc-card {
+            background: white;
+            border: 1px solid var(--border);
+            border-radius: var(--radius);
+            padding: 16px;
+            cursor: pointer;
+            transition: all 0.15s;
+        }
+        .doc-card:hover { border-color: var(--brand-muted); box-shadow: var(--shadow); }
+
+        /* Loader */
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .spinner {
+            width: 36px; height: 36px;
+            border: 3px solid var(--border);
+            border-top-color: var(--brand);
+            border-radius: 50%;
+            animation: spin 0.7s linear infinite;
+        }
+
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
+        .fade-in { animation: fadeIn 0.2s ease forwards; }
+
+        /* Signature tip */
+        .sign-tip {
+            font-size: 12px;
+            color: var(--text-secondary);
+            text-align: center;
+            padding: 6px 0;
+        }
+
+        /* Format select */
+        .format-select {
+            padding: 4px 6px;
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            font-size: 12px;
+            background: transparent;
+            color: var(--text-secondary);
+            cursor: pointer;
+        }
+
+        /* Placed signatures */
+        .placed-signature {
+            position: absolute;
+            z-index: 40;
+            user-select: none;
+            touch-action: none;
+        }
+
+        .placed-signature img {
+            display: block;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+        }
+
+        .placed-signature.is-active {
+            cursor: move;
+            border: 1.5px dashed var(--brand);
+            background: rgba(37, 99, 235, 0.06);
+            border-radius: 4px;
+            pointer-events: auto;
+        }
+
+        .placed-signature.is-active::after {
+            content: "Arrastra y ajusta";
+            position: absolute;
+            bottom: -22px;
+            left: 50%;
+            transform: translateX(-50%);
+            font-size: 10px;
+            color: var(--brand);
+            white-space: nowrap;
+            font-family: 'Inter', sans-serif;
+            font-weight: 500;
+            pointer-events: none;
+        }
+
+        .signature-resize-handle {
+            position: absolute;
+            right: -7px;
+            bottom: -7px;
+            width: 14px;
+            height: 14px;
+            border-radius: 999px;
+            background: var(--brand);
+            border: 2px solid white;
+            box-shadow: var(--shadow-sm);
+            cursor: nwse-resize;
+        }
+
+        /* Status dot */
+        .status-dot {
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            display: inline-block;
+        }
+        .status-dot.open { background: var(--success); }
+        .status-dot.closed { background: var(--text-muted); }
+
+        /* Notification toast */
+        #toast {
+            position: fixed;
+            bottom: 80px;
+            left: 50%;
+            transform: translateX(-50%) translateY(20px);
+            background: var(--text);
+            color: white;
+            padding: 10px 18px;
+            border-radius: 99px;
+            font-size: 13px;
+            font-weight: 500;
+            z-index: 600;
+            opacity: 0;
+            transition: all 0.25s;
+            white-space: nowrap;
+            pointer-events: none;
+        }
+        #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+
+        /* Signature count badge on document */
+        #sigs-overlay-badge {
+            position: fixed;
+            top: 16px;
+            right: 16px;
+            z-index: 90;
+            background: white;
+            border: 1px solid var(--border);
+            border-radius: 99px;
+            padding: 5px 12px;
+            font-size: 12px;
+            font-weight: 500;
+            color: var(--text-secondary);
+            display: none;
+            gap: 5px;
+            align-items: center;
+            box-shadow: var(--shadow-sm);
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Toast notification -->
+    <div id="toast"></div>
+
+    <!-- Global Loader -->
+    <div id="global-loader" class="hidden" style="position:fixed;inset:0;background:#f1f5f9;z-index:400;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;">
+        <div class="spinner"></div>
+        <p style="font-size:14px;color:var(--text-secondary);font-weight:500;">Cargando documento…</p>
+    </div>
+
+    <!-- Error Modal -->
+    <div id="error-modal" class="modal-overlay hidden" style="align-items:center;justify-content:center;">
+        <div class="error-card fade-in">
+            <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;">
+                <div style="width:36px;height:36px;background:var(--danger-bg);border-radius:8px;display:flex;align-items:center;justify-content:center;flex-shrink:0;">
+                    <svg width="18" height="18" fill="none" stroke="var(--danger)" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/></svg>
+                </div>
+                <h3 style="font-size:15px;font-weight:600;margin:0;">Aviso</h3>
+            </div>
+            <p id="error-message" style="font-size:13px;color:var(--text-secondary);line-height:1.6;margin:0 0 16px;"></p>
+            <button onclick="document.getElementById('error-modal').classList.add('hidden')" class="btn btn-secondary btn-full">Entendido</button>
+        </div>
+    </div>
+
+    <!-- Auth Screen -->
+    <div id="auth-wrapper" class="hidden" style="position:fixed;inset:0;background:#f1f5f9;z-index:300;display:flex;align-items:center;justify-content:center;padding:16px;">
+        <div class="auth-card">
+            <div style="text-align:center;margin-bottom:24px;">
+                <div style="width:48px;height:48px;background:var(--brand);border-radius:12px;display:flex;align-items:center;justify-content:center;margin:0 auto 12px;">
+                    <svg width="26" height="26" fill="none" stroke="white" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
+                </div>
+                <h2 id="auth-title" style="font-size:20px;font-weight:600;margin:0 0 4px;">Bienvenido</h2>
+                <p style="font-size:12px;color:var(--text-muted);margin:0;">Acceso para creadores de documentos</p>
+            </div>
+
+            <form id="auth-form" style="display:flex;flex-direction:column;gap:12px;">
+                <input type="email" id="auth-email" placeholder="correo@ejemplo.com" required class="input-field">
+                <input type="password" id="auth-pass" placeholder="Contraseña" required class="input-field">
+                <button type="submit" id="auth-submit" class="btn btn-primary btn-lg btn-full">Entrar</button>
+            </form>
+
+            <div style="position:relative;margin:16px 0;text-align:center;">
+                <div style="position:absolute;top:50%;left:0;right:0;height:1px;background:var(--border);"></div>
+                <span style="position:relative;background:white;padding:0 10px;font-size:11px;color:var(--text-muted);font-weight:500;">o</span>
+            </div>
+
+            <button id="auth-anon-btn" class="btn btn-secondary btn-full" style="font-size:13px;">
+                <svg width="15" height="15" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
+                Entrar como firmante invitado
+            </button>
+
+            <p style="text-align:center;font-size:12px;color:var(--text-secondary);margin-top:16px;margin-bottom:0;">
+                <span id="auth-toggle-text">¿No tienes cuenta?</span>
+                <button id="auth-toggle-btn" style="color:var(--brand);font-weight:600;background:none;border:none;cursor:pointer;padding:0;margin-left:4px;font-size:12px;">Regístrate</button>
+            </p>
+        </div>
+    </div>
+
+    <!-- Main App -->
+    <div id="app-wrapper" class="hidden" style="height:100vh;display:flex;flex-direction:row;overflow:hidden;position:relative;">
+
+        <!-- Sidebar (Creator mode) -->
+        <aside id="sidebar-creator" class="hidden" style="width:300px;flex-shrink:0;height:100%;overflow:hidden;display:flex;flex-direction:column;">
+            
+            <div class="sidebar-header">
+                <div class="logo">
+                    <div class="logo-icon">
+                        <svg fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
+                    </div>
+                    <div>
+                        <div class="logo-text">DocuFirma</div>
+                        <div class="logo-subtitle">Firma de documentos</div>
+                    </div>
+                </div>
+                <button id="logout-btn" class="btn btn-ghost btn-icon" title="Cerrar sesión">
+                    <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/></svg>
+                </button>
+            </div>
+
+            <div class="sidebar-tabs">
+                <button id="tab-create" class="sidebar-tab active">
+                    <svg width="13" height="13" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="display:inline;vertical-align:-2px;margin-right:4px;"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
+                    Redactar
+                </button>
+                <button id="tab-dashboard" class="sidebar-tab">
+                    <svg width="13" height="13" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="display:inline;vertical-align:-2px;margin-right:4px;"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 10h16M4 14h16M4 18h16"/></svg>
+                    Mis docs
+                </button>
+            </div>
+
+            <div class="sidebar-body" id="sidebar-content-area">
+                
+                <!-- Mode selector -->
+                <div>
+                    <div class="section-label">Tipo de documento</div>
+                    <div class="toggle-group">
+                        <button id="mode-text-btn" class="toggle-btn active">
+                            <svg width="12" height="12" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="display:inline;vertical-align:-1px;margin-right:3px;"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
+                            Escribir texto
+                        </button>
+                        <button id="mode-pdf-btn" class="toggle-btn">
+                            <svg width="12" height="12" fill="none" stroke="currentColor" viewBox="0 0 24 24" style="display:inline;vertical-align:-1px;margin-right:3px;"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z"/></svg>
+                            Subir PDF
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Text tools -->
+                <div id="text-tools">
+                    <div class="section-label">Formato</div>
+                    <div class="format-bar" style="flex-wrap:wrap;gap:2px;">
+                        <button class="format-btn" onclick="document.execCommand('bold',false,null)" title="Negrita"><b>B</b></button>
+                        <button class="format-btn" onclick="document.execCommand('italic',false,null)" title="Cursiva"><i>I</i></button>
+                        <button class="format-btn" onclick="document.execCommand('underline',false,null)" title="Subrayado"><u>U</u></button>
+                        <div class="format-sep"></div>
+                        <button class="format-btn" onclick="document.execCommand('justifyLeft',false,null)" title="Izquierda">⇤</button>
+                        <button class="format-btn" onclick="document.execCommand('justifyCenter',false,null)" title="Centrar">⇔</button>
+                        <button class="format-btn" onclick="document.execCommand('justifyRight',false,null)" title="Derecha">⇥</button>
+                        <div class="format-sep"></div>
+                        <select class="format-select" id="heading-select" title="Estilo de texto">
+                            <option value="">Párrafo</option>
+                            <option value="h1">Título 1</option>
+                            <option value="h2">Título 2</option>
+                            <option value="h3">Título 3</option>
+                        </select>
+                        <div class="format-sep"></div>
+                        <button class="format-btn" id="toggle-html-btn" title="Ver código HTML" style="font-size:10px;font-family:monospace;padding:5px 6px;">&lt;/&gt;</button>
+                    </div>
+                </div>
+
+                <!-- PDF tools -->
+                <div id="pdf-tools" class="hidden">
+                    <div class="section-label">Archivo PDF</div>
+                    <label class="upload-zone" id="upload-zone-label">
+                        <svg fill="none" viewBox="0 0 24 24" stroke="var(--brand)">
+                            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
+                        </svg>
+                        <div id="file-name-display" style="font-size:13px;font-weight:500;color:var(--brand);">Haz clic para subir</div>
+                        <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">PDF — máx. 800 KB</div>
+                        <input type="file" id="pdf-upload" accept="application/pdf" class="hidden">
+                    </label>
+                </div>
+
+                <!-- Share button -->
+                <div>
+                    <button id="share-link-btn" class="btn btn-primary btn-lg btn-full">
+                        <svg width="15" height="15" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z"/></svg>
+                        Guardar y compartir
+                    </button>
+                    <p style="font-size:11px;color:var(--text-muted);text-align:center;margin-top:6px;">Se copiará el enlace al portapapeles</p>
+                </div>
+
+            </div>
+        </aside>
+
+        <!-- Main viewer -->
+        <main class="viewer-container" id="main-viewer" style="flex:1;position:relative;">
+
+            <!-- Dashboard view -->
+            <div id="dashboard-view" class="hidden" style="width:100%;max-width:680px;padding-top:8px;">
+                <div style="margin-bottom:20px;">
+                    <h2 style="font-size:18px;font-weight:600;margin:0 0 4px;">Mis documentos</h2>
+                    <p style="font-size:13px;color:var(--text-muted);margin:0;">Documentos que creaste o firmaste</p>
+                </div>
+                <div id="dashboard-list" style="display:flex;flex-direction:column;gap:10px;">
+                    <p style="font-size:13px;color:var(--text-muted);">Cargando…</p>
+                </div>
+            </div>
+
+            <!-- Document sheet (wrapped for scaling) -->
+            <div class="a4-scale-wrapper" id="a4-scale-wrapper">
+            <div id="document-wrapper" class="a4-page">
+                <div id="document-content" contenteditable="true" style="width:100%;"></div>
+                <textarea id="document-html-source" class="hidden" style="width:100%;min-height:500px;font-family:monospace;font-size:12px;padding:12px;border:1.5px dashed var(--border-strong);border-radius:6px;outline:none;resize:vertical;color:var(--text);background:var(--surface-raised);" placeholder="<h1>Pega aquí tu código HTML…</h1>"></textarea>
+                <div id="pdf-viewer-container" class="hidden" style="width:100%;display:flex;flex-direction:column;align-items:center;"></div>
+                <div id="placed-signatures-container" style="position:absolute;inset:0;width:100%;height:100%;pointer-events:none;z-index:40;"></div>
+                <img id="draggable-signature" src="" alt="Firma">
+            </div><!-- end a4-page -->
+            </div><!-- end a4-scale-wrapper -->
+        </main>
+
+        <!-- Bottom bar (shared/signer mode) -->
+        <div id="bottom-bar">
+            <!-- Sig count row -->
+            <div id="bar-sigs-row" class="hidden" style="display:flex;justify-content:center;">
+                <div class="sig-count-pill">
+                    <svg width="13" height="13" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/></svg>
+                    <span id="sig-count-text">0 firmas</span>
+                </div>
+            </div>
+
+            <!-- Info row (signing) -->
+            <div id="bar-state-info" class="hidden sign-tip"></div>
+
+            <!-- Actions row -->
+            <div style="display:flex;gap:8px;">
+                <button id="btn-start-sign" class="btn btn-primary btn-lg btn-full hidden">
+                    <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z"/></svg>
+                    Añadir mi firma
+                </button>
+
+                <div id="bar-state-save" class="hidden" style="display:flex;gap:8px;flex:1;">
+                    <button id="btn-cancel-sign" class="btn btn-secondary btn-lg" style="flex:1;">Cancelar</button>
+                    <button id="btn-confirm-save" class="btn btn-success btn-lg" style="flex:2;">
+                        <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                        Guardar firma
+                    </button>
+                </div>
+
+                <button id="btn-download-pdf" class="btn btn-primary btn-lg btn-full hidden">
+                    <svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg>
+                    Descargar PDF firmado
+                </button>
+            </div>
+
+            <!-- Close doc (author only) -->
+            <button id="btn-close-document" class="btn btn-danger btn-full hidden" style="font-size:13px;">
+                <svg width="15" height="15" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
+                Finalizar — nadie más podrá firmar
+            </button>
+        </div>
+
+    </div>
+
+    <!-- Signature Modal -->
+    <div id="modal-signature" class="modal-overlay hidden">
+        <div class="modal-sheet">
+            <div style="padding:12px 0 0;display:block;" class="md:hidden">
+                <div class="modal-drag-handle"></div>
+            </div>
+            <div class="modal-header">
+                <div>
+                    <h3 style="font-size:15px;font-weight:600;margin:0;">Tu firma</h3>
+                    <p style="font-size:12px;color:var(--text-muted);margin:0;">Dibuja con el ratón o el dedo</p>
+                </div>
+                <button id="modal-btn-close" class="btn btn-ghost btn-icon">
+                    <svg width="18" height="18" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                </button>
+            </div>
+            <div style="position:relative;background:var(--surface-raised);">
+                <canvas id="signature-pad" style="width:100%;height:200px;display:block;"></canvas>
+                <div class="signature-guide-line"></div>
+                <p style="position:absolute;top:8px;left:50%;transform:translateX(-50%);font-size:11px;color:var(--border-strong);white-space:nowrap;pointer-events:none;">Firma aquí</p>
+            </div>
+            <div style="padding:12px 16px;background:white;display:flex;gap:8px;border-top:1px solid var(--border);">
+                <button id="modal-btn-clear" class="btn btn-secondary" style="flex:1;">Borrar</button>
+                <button id="modal-btn-accept" class="btn btn-primary" style="flex:2;" disabled>Usar esta firma</button>
+            </div>
+        </div>
+    </div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, addDoc, getDoc, doc, onSnapshot, updateDoc, arrayUnion } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Mostrar pantalla correcta de inmediato sin esperar a Firebase
+        const urlParamsInitial = new URLSearchParams(window.location.search);
+        const currentDocIdInitial = urlParamsInitial.get('doc');
+        const loader = document.getElementById('global-loader');
+        const authWrapperEarly = document.getElementById('auth-wrapper');
+
+        if (currentDocIdInitial) {
+            // Modo firmante: mostrar loader mientras carga el doc
+            loader.style.display = 'flex';
+            loader.classList.remove('hidden');
+        } else {
+            // Modo creador: mostrar login de inmediato
+            authWrapperEarly.style.display = 'flex';
+            authWrapperEarly.classList.remove('hidden');
+        }
+
+        // Toast utility
+        let toastTimer;
+        window.showToast = function(msg, duration = 2500) {
+            const t = document.getElementById('toast');
+            t.textContent = msg;
+            t.classList.add('show');
+            clearTimeout(toastTimer);
+            toastTimer = setTimeout(() => t.classList.remove('show'), duration);
+        };
+
+        window.showError = function(msg) {
+            document.getElementById('error-message').textContent = msg;
+            document.getElementById('error-modal').classList.remove('hidden');
+        };
+
+        // DOM refs
+        const authWrapper = document.getElementById('auth-wrapper');
+        const appWrapper = document.getElementById('app-wrapper');
+        const authForm = document.getElementById('auth-form');
+        const authEmail = document.getElementById('auth-email');
+        const authPass = document.getElementById('auth-pass');
+        const authSubmit = document.getElementById('auth-submit');
+        const authToggleBtn = document.getElementById('auth-toggle-btn');
+        const authTitle = document.getElementById('auth-title');
+        const authToggleText = document.getElementById('auth-toggle-text');
+        const logoutBtn = document.getElementById('logout-btn');
+        const authAnonBtn = document.getElementById('auth-anon-btn');
+        let isLoginMode = true;
+        let isHtmlMode = false;
+
+        const sidebarCreator = document.getElementById('sidebar-creator');
+        const docWrapper = document.getElementById('document-wrapper');
+        const docContent = document.getElementById('document-content');
+        const htmlSource = document.getElementById('document-html-source');
+        const pdfViewerContainer = document.getElementById('pdf-viewer-container');
+        const toggleHtmlBtn = document.getElementById('toggle-html-btn');
+        const shareLinkBtn = document.getElementById('share-link-btn');
+        const placedSignaturesContainer = document.getElementById('placed-signatures-container');
+
+        const modeTextBtn = document.getElementById('mode-text-btn');
+        const modePdfBtn = document.getElementById('mode-pdf-btn');
+        const textTools = document.getElementById('text-tools');
+        const pdfTools = document.getElementById('pdf-tools');
+        const pdfUpload = document.getElementById('pdf-upload');
+        const fileNameDisplay = document.getElementById('file-name-display');
+        const uploadZone = document.getElementById('upload-zone-label');
+
+        const tabCreate = document.getElementById('tab-create');
+        const tabDashboard = document.getElementById('tab-dashboard');
+        const dashboardView = document.getElementById('dashboard-view');
+        const dashboardList = document.getElementById('dashboard-list');
+
+        const bottomBar = document.getElementById('bottom-bar');
+        const btnStartSign = document.getElementById('btn-start-sign');
+        const barStateSave = document.getElementById('bar-state-save');
+        const btnCancelSign = document.getElementById('btn-cancel-sign');
+        const btnConfirmSave = document.getElementById('btn-confirm-save');
+        const btnDownloadPdf = document.getElementById('btn-download-pdf');
+        const barStateInfo = document.getElementById('bar-state-info');
+        const btnCloseDocument = document.getElementById('btn-close-document');
+        const barSigsRow = document.getElementById('bar-sigs-row');
+        const sigCountText = document.getElementById('sig-count-text');
+
+        const modalSignature = document.getElementById('modal-signature');
+        const dragSig = document.getElementById('draggable-signature');
+        const canvasSig = document.getElementById('signature-pad');
+        const ctxSig = canvasSig.getContext('2d');
+        const modalBtnClose = document.getElementById('modal-btn-close');
+        const modalBtnClear = document.getElementById('modal-btn-clear');
+        const modalBtnAccept = document.getElementById('modal-btn-accept');
+
+        const headingSelect = document.getElementById('heading-select');
+
+        let db, auth, appId;
+        let currentUser = null;
+        let currentDocId = null;
+        let currentDocData = null;
+        let isDocumentShared = !!currentDocIdInitial;
+        let currentCreationMode = 'html';
+        let pendingPdfBase64 = null;
+        let currentPdfBase64 = null;
+        let pdfPageLayers = [];
+        let pdfResizeRaf = null;
+        let activePdfSignature = null;
+        let activeSignaturePointer = null;
+
+        const defaultTemplateHtml = `<h1 style="text-align:center;"><strong>TÍTULO DEL DOCUMENTO</strong></h1><p><br></p><p>Fecha: ______ de ______________ de 20__</p><p><br></p><p>Por la presente, el suscrito declara que…</p><p><em>(Borra este texto y redacta el contenido del documento)</em></p>`;
+
+        // Heading select
+        headingSelect?.addEventListener('change', () => {
+            const val = headingSelect.value;
+            if (val) document.execCommand('formatBlock', false, val);
+            else document.execCommand('formatBlock', false, 'p');
+            headingSelect.value = '';
+            docContent.focus();
+        });
+
+        // Mode toggle
+        modeTextBtn.addEventListener('click', () => {
+            currentCreationMode = 'html';
+            modeTextBtn.classList.add('active');
+            modePdfBtn.classList.remove('active');
+            textTools.classList.remove('hidden');
+            pdfTools.classList.add('hidden');
+            pdfViewerContainer.classList.add('hidden');
+            docContent.classList.remove('hidden');
+            if (isHtmlMode) { docContent.classList.add('hidden'); htmlSource.classList.remove('hidden'); }
+        });
+
+        modePdfBtn.addEventListener('click', () => {
+            currentCreationMode = 'pdf';
+            modePdfBtn.classList.add('active');
+            modeTextBtn.classList.remove('active');
+            textTools.classList.add('hidden');
+            pdfTools.classList.remove('hidden');
+            docContent.classList.add('hidden');
+            htmlSource.classList.add('hidden');
+            pdfViewerContainer.classList.remove('hidden');
+        });
+
+        // PDF upload
+        pdfUpload.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            if (!file) return;
+            if (file.size > 800 * 1024) {
+                window.showError("El PDF pesa más de 800 KB. Sube un archivo más ligero o usa el modo Escribir.");
+                pdfUpload.value = '';
+                return;
+            }
+            fileNameDisplay.textContent = file.name;
+            uploadZone.classList.add('has-file');
+            const reader = new FileReader();
+            reader.onload = function() {
+                pendingPdfBase64 = this.result;
+                renderPdfToDOM(pendingPdfBase64);
+            };
+            reader.readAsDataURL(file);
+        });
+
+        async function renderPdfToDOM(base64Data) {
+            try {
+                currentPdfBase64 = base64Data;
+                const base64Str = base64Data.split(',')[1];
+                const binaryStr = atob(base64Str);
+                const bytes = new Uint8Array(binaryStr.length);
+                for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
+                const pdf = await window.pdfjsLib.getDocument({ data: bytes }).promise;
+                pdfViewerContainer.innerHTML = '';
+                pdfPageLayers = [];
+                const availableWidth = Math.max(pdfViewerContainer.clientWidth, 1);
+                for (let n = 1; n <= pdf.numPages; n++) {
+                    const page = await pdf.getPage(n);
+                    const baseViewport = page.getViewport({ scale: 1 });
+                    const pageScale = availableWidth / baseViewport.width;
+                    const viewport = page.getViewport({ scale: pageScale });
+                    const shell = document.createElement('div');
+                    shell.className = 'pdf-page-shell';
+                    shell.dataset.page = String(n);
+                    shell.style.height = `${viewport.height}px`;
+                    const canvas = document.createElement('canvas');
+                    canvas.className = 'pdf-page-canvas';
+                    canvas.width = viewport.width;
+                    canvas.height = viewport.height;
+                    const ctx = canvas.getContext('2d');
+                    const signatureLayer = document.createElement('div');
+                    signatureLayer.className = 'signature-layer';
+                    signatureLayer.dataset.page = String(n);
+                    await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+                    shell.appendChild(canvas);
+                    shell.appendChild(signatureLayer);
+                    pdfViewerContainer.appendChild(shell);
+                    pdfPageLayers.push(signatureLayer);
+                }
+                renderPlacedSignatures(currentDocData?.signatures || []);
+                renderActivePdfSignature();
+            } catch (err) {
+                console.error(err);
+                window.showError("Error al procesar el PDF. Verifica que el archivo sea válido.");
+            }
+        }
+
+        function getPdfPageLayer(pageNumber) {
+            return pdfPageLayers.find(layer => Number(layer.dataset.page) === Number(pageNumber)) || null;
+        }
+
+        function getDefaultPdfSignatureSize(imageWidth, imageHeight, layer) {
+            const safeLayer = layer || pdfPageLayers[0];
+            if (!safeLayer) return { width: 0.24, height: 0.1 };
+            const aspectRatio = imageWidth && imageHeight ? imageHeight / imageWidth : 0.35;
+            const width = Math.min(0.32, Math.max(0.18, 160 / safeLayer.clientWidth));
+            const height = Math.min(0.22, Math.max(0.08, width * aspectRatio * (safeLayer.clientWidth / safeLayer.clientHeight)));
+            return { width, height };
+        }
+
+        function createSignatureElement(sig, isActive = false) {
+            const wrapper = document.createElement('div');
+            wrapper.className = isActive ? 'placed-signature is-active' : 'placed-signature';
+            wrapper.style.left = `${sig.x * 100}%`;
+            wrapper.style.top = `${sig.y * 100}%`;
+            wrapper.style.width = `${sig.width * 100}%`;
+            wrapper.style.height = `${sig.height * 100}%`;
+
+            const img = document.createElement('img');
+            img.src = sig.image;
+            img.alt = 'Firma';
+            wrapper.appendChild(img);
+
+            if (isActive) {
+                const handle = document.createElement('div');
+                handle.className = 'signature-resize-handle';
+                wrapper.appendChild(handle);
+            }
+
+            return wrapper;
+        }
+
+        function renderActivePdfSignature() {
+            if (!activePdfSignature || !currentDocData || currentDocData.type !== 'pdf') return;
+            const layer = getPdfPageLayer(activePdfSignature.page);
+            if (!layer) return;
+
+            document.querySelectorAll('.placed-signature.is-active').forEach(node => node.remove());
+            const element = createSignatureElement(activePdfSignature, true);
+            layer.appendChild(element);
+        }
+
+        // HTML toggle
+        toggleHtmlBtn?.addEventListener('click', () => {
+            isHtmlMode = !isHtmlMode;
+            if (isHtmlMode) {
+                htmlSource.value = docContent.innerHTML;
+                docContent.classList.add('hidden');
+                htmlSource.classList.remove('hidden');
+                toggleHtmlBtn.style.background = 'var(--brand-light)';
+                toggleHtmlBtn.style.color = 'var(--brand)';
+            } else {
+                docContent.innerHTML = htmlSource.value;
+                htmlSource.classList.add('hidden');
+                docContent.classList.remove('hidden');
+                toggleHtmlBtn.style.background = '';
+                toggleHtmlBtn.style.color = '';
+            }
+        });
+
+        // Tab switching
+        function switchTab(name) {
+            if (name === 'create') {
+                tabCreate.classList.add('active');
+                tabDashboard.classList.remove('active');
+                document.getElementById('sidebar-content-area').classList.remove('hidden');
+                docWrapper.classList.remove('hidden');
+                dashboardView.classList.add('hidden');
+            } else {
+                tabDashboard.classList.add('active');
+                tabCreate.classList.remove('active');
+                document.getElementById('sidebar-content-area').classList.add('hidden');
+                docWrapper.classList.add('hidden');
+                dashboardView.classList.remove('hidden');
+                loadDashboard();
+            }
+        }
+        tabCreate?.addEventListener('click', () => switchTab('create'));
+        tabDashboard?.addEventListener('click', () => switchTab('dashboard'));
+
+        // Bottom bar
+        function setBottomBarState(state) {
+            btnStartSign.classList.add('hidden');
+            barStateSave.style.display = 'none';
+            barStateSave.classList.add('hidden');
+            btnDownloadPdf.classList.add('hidden');
+            barStateInfo.classList.add('hidden');
+            btnCloseDocument.classList.add('hidden');
+            barSigsRow.classList.add('hidden');
+
+            if (!currentDocData) return;
+
+            const isAuthor = currentUser && currentUser.uid === currentDocData.authorId;
+            const isDocClosed = currentDocData.status === 'closed';
+            const sigCount = (currentDocData.signatures || []).length;
+
+            // Always show sig count for viewer mode
+            if (isDocumentShared && sigCount >= 0) {
+                barSigsRow.classList.remove('hidden');
+                barSigsRow.style.display = 'flex';
+                sigCountText.textContent = sigCount === 1 ? '1 firma registrada' : `${sigCount} firmas registradas`;
+            }
+
+            if (isDocClosed) {
+                // Doc cerrado: solo descargar
+                btnDownloadPdf.classList.remove('hidden');
+            } else {
+                if (state === 'signing') {
+                    barStateSave.classList.remove('hidden');
+                    barStateSave.style.display = 'flex';
+                    barStateInfo.classList.remove('hidden');
+                    barStateInfo.textContent = 'Arrastra la firma a tu posición preferida y presiona Guardar.';
+                } else {
+                    // Doc abierto: mostrar botón de firma a todos
+                    btnStartSign.classList.remove('hidden');
+                    // Mostrar "Finalizar" al autor aunque esté en modo visor
+                    if (isAuthor) {
+                        btnCloseDocument.classList.remove('hidden');
+                        btnCloseDocument.style.display = 'flex';
+                    }
+                }
+            }
+
+            bottomBar.classList.add('visible');
+        }
+
+        // Fallback: si Firebase falla o tarda, mostrar login
+        function showAuthScreen() {
+            loader.style.display = 'none';
+            loader.classList.add('hidden');
+            document.getElementById('app-wrapper').classList.add('hidden');
+            const aw = document.getElementById('auth-wrapper');
+            aw.style.display = 'flex';
+            aw.classList.remove('hidden');
+        }
+
+        // Timeout de seguridad: si Firebase no responde en 8s, mostrar login
+        const firebaseTimeout = setTimeout(() => {
+            if (document.getElementById('app-wrapper').classList.contains('hidden') &&
+                document.getElementById('auth-wrapper').classList.contains('hidden')) {
+                showAuthScreen();
+            }
+        }, 8000);
+
+        // --- FIREBASE INIT ---
+        try {
+            const miConfiguracionFirebase = {
+                apiKey: "AIzaSyCO_IRp2pqG8H7Hs4rvsldtXdy8VdXg-9Q",
+                authDomain: "firmas-hvp.firebaseapp.com",
+                projectId: "firmas-hvp",
+                storageBucket: "firmas-hvp.firebasestorage.app",
+                messagingSenderId: "279125849068",
+                appId: "1:279125849068:web:099ae22e9c9b8f666486c9"
+            };
+            const appFirebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : miConfiguracionFirebase;
+            appId = typeof __app_id !== 'undefined' ? __app_id : 'mi-app-firmas';
+
+            if (appFirebaseConfig && appFirebaseConfig.apiKey !== "TU_API_KEY") {
+                const app = initializeApp(appFirebaseConfig);
+                auth = getAuth(app);
+                db = getFirestore(app);
+
+                const urlParams = new URLSearchParams(window.location.search);
+                currentDocId = urlParams.get('doc');
+                isDocumentShared = !!currentDocId;
+
+                const initAuth = async () => {
+                    if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                        await signInWithCustomToken(auth, __initial_auth_token);
+                    } else if (isDocumentShared) {
+                        if (!auth.currentUser) await signInAnonymously(auth);
+                    }
+                };
+                initAuth().catch(console.error);
+
+                onAuthStateChanged(auth, (user) => {
+                    clearTimeout(firebaseTimeout);
+                    currentUser = user;
+
+                    if (isDocumentShared) {
+                        // Modo visor/firmante
+                        authWrapper.classList.add('hidden');
+                        authWrapper.style.display = 'none';
+                        sidebarCreator.classList.add('hidden');
+                        sidebarCreator.style.display = 'none';
+                        dashboardView.classList.add('hidden');
+                        docContent.setAttribute('contenteditable', 'false');
+                        appWrapper.classList.remove('hidden');
+                        appWrapper.style.display = 'flex';
+                        loadDocumentRealtime(currentDocId);
+                    } else {
+                        // Modo creador
+                        loader.style.display = 'none';
+                        loader.classList.add('hidden');
+
+                        if (user) {
+                            authWrapper.classList.add('hidden');
+                            authWrapper.style.display = 'none';
+                            appWrapper.classList.remove('hidden');
+                            appWrapper.style.display = 'flex';
+                            sidebarCreator.classList.remove('hidden');
+                            sidebarCreator.style.display = 'flex';
+
+                            if (user.isAnonymous) {
+                                tabCreate.classList.add('hidden');
+                                switchTab('dashboard');
+                            } else {
+                                tabCreate.classList.remove('hidden');
+                                switchTab('create');
+                                if (!docContent.innerHTML.trim()) {
+                                    docContent.innerHTML = defaultTemplateHtml;
+                                }
+                            }
+                        } else {
+                            // Sin sesión → mostrar login
+                            appWrapper.classList.add('hidden');
+                            appWrapper.style.display = 'none';
+                            authWrapper.classList.remove('hidden');
+                            authWrapper.style.display = 'flex';
+                        }
+                    }
+                });
+
+                authAnonBtn?.addEventListener('click', async (e) => {
+                    e.preventDefault();
+                    authAnonBtn.disabled = true;
+                    authAnonBtn.textContent = 'Cargando…';
+                    try { await signInAnonymously(auth); }
+                    catch (err) {
+                        console.error(err);
+                        authAnonBtn.disabled = false;
+                        authAnonBtn.textContent = 'Entrar como firmante invitado';
+                    }
+                });
+            }
+        } catch (error) {
+            console.warn("Firebase error:", error);
+            // Si Firebase falla completamente, mostrar login
+            showAuthScreen();
+        }
+
+        // Auth form
+        authForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            authSubmit.disabled = true;
+            authSubmit.textContent = 'Procesando…';
+            try {
+                if (isLoginMode) await signInWithEmailAndPassword(auth, authEmail.value, authPass.value);
+                else await createUserWithEmailAndPassword(auth, authEmail.value, authPass.value);
+            } catch (error) {
+                window.showError('Verifica tus datos e intenta de nuevo. (' + error.code + ')');
+            } finally {
+                authSubmit.disabled = false;
+                authSubmit.textContent = isLoginMode ? 'Entrar' : 'Registrarse';
+            }
+        });
+
+        authToggleBtn.addEventListener('click', (e) => {
+            e.preventDefault();
+            isLoginMode = !isLoginMode;
+            authTitle.textContent = isLoginMode ? 'Bienvenido' : 'Crear cuenta';
+            authSubmit.textContent = isLoginMode ? 'Entrar' : 'Registrarse';
+            authToggleText.textContent = isLoginMode ? '¿No tienes cuenta?' : '¿Ya tienes cuenta?';
+            authToggleBtn.textContent = isLoginMode ? 'Regístrate' : 'Inicia sesión';
+        });
+
+        logoutBtn?.addEventListener('click', async () => await signOut(auth));
+
+        // Load document realtime
+        function loadDocumentRealtime(docId) {
+            if (!db) return;
+            const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'shared_docs', docId);
+            onSnapshot(docRef, (docSnap) => {
+                document.getElementById('global-loader').classList.add('hidden');
+                document.getElementById('global-loader').style.display = 'none';
+                appWrapper.classList.remove('hidden');
+                appWrapper.style.display = 'flex';
+
+                if (docSnap.exists()) {
+                    currentDocData = docSnap.data();
+                    if (currentDocData.type === 'pdf') {
+                        currentCreationMode = 'pdf';
+                        docContent.innerHTML = '';
+                        docContent.classList.add('hidden');
+                        htmlSource.classList.add('hidden');
+                        pdfViewerContainer.classList.remove('hidden');
+                        renderPdfToDOM(currentDocData.content);
+                    } else {
+                        currentCreationMode = 'html';
+                        pdfViewerContainer.classList.add('hidden');
+                        docContent.classList.remove('hidden');
+                        docContent.innerHTML = currentDocData.content;
+                    }
+                    renderPlacedSignatures(currentDocData.signatures || []);
+                    setBottomBarState('default');
+                } else {
+                    docContent.innerHTML = '<p style="color:var(--danger);text-align:center;margin-top:48px;font-family:Inter,sans-serif;">Documento no encontrado o eliminado.</p>';
+                    setBottomBarState('default');
+                }
+            });
+        }
+
+        function renderPlacedSignatures(signaturesArray) {
+            placedSignaturesContainer.innerHTML = '';
+            if (currentDocData?.type === 'pdf') {
+                pdfPageLayers.forEach(layer => { layer.innerHTML = ''; });
+                signaturesArray.forEach(sig => {
+                    const layer = getPdfPageLayer(sig.page);
+                    if (!layer) return;
+                    layer.appendChild(createSignatureElement(sig));
+                });
+                renderActivePdfSignature();
+                return;
+            }
+
+            signaturesArray.forEach(sig => {
+                const img = document.createElement('img');
+                img.src = sig.image;
+                img.className = 'placed-signature';
+                img.style.left = sig.xPct + '%';
+                img.style.top = sig.yPct + '%';
+                img.style.width = sig.wPct + '%';
+                placedSignaturesContainer.appendChild(img);
+            });
+        }
+
+        // Dashboard
+        function loadDashboard() {
+            if (!db || !currentUser) return;
+            const docsRef = collection(db, 'artifacts', appId, 'public', 'data', 'shared_docs');
+            onSnapshot(docsRef, (snapshot) => {
+                dashboardList.innerHTML = '';
+                let hasDocs = false;
+                snapshot.forEach(docSnap => {
+                    const data = docSnap.data();
+                    const id = docSnap.id;
+                    const isAuthor = data.authorId === currentUser.uid;
+                    const hasSigned = data.signatures && data.signatures.some(s => s.userId === currentUser.uid);
+                    if (isAuthor || hasSigned) {
+                        hasDocs = true;
+                        let title = "Documento PDF";
+                        if (data.type === 'html') {
+                            const tmp = document.createElement('div');
+                            tmp.innerHTML = data.content;
+                            const el = tmp.querySelector('h1, h2, h3, strong');
+                            title = el ? el.innerText.substring(0, 60) : 'Documento de texto';
+                        }
+                        const dateStr = new Date(data.createdAt).toLocaleDateString('es', { day:'2-digit', month:'short', year:'numeric' });
+                        const sigCount = data.signatures ? data.signatures.length : 0;
+                        const isClosed = data.status === 'closed';
+
+                        const div = document.createElement('div');
+                        div.className = 'doc-card fade-in';
+                        div.innerHTML = `
+                            <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;">
+                                <div style="flex:1;min-width:0;">
+                                    <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px;flex-wrap:wrap;">
+                                        <span class="badge ${isAuthor ? 'badge-blue' : 'badge-green'}">${isAuthor ? 'Creador' : 'Firmante'}</span>
+                                        <span class="badge ${isClosed ? 'badge-gray' : 'badge-amber'}">
+                                            <span class="status-dot ${isClosed ? 'closed' : 'open'}"></span>
+                                            ${isClosed ? 'Finalizado' : 'Activo'}
+                                        </span>
+                                        <span class="badge badge-gray">${data.type === 'pdf' ? 'PDF' : 'Texto'}</span>
+                                    </div>
+                                    <h3 style="font-size:14px;font-weight:600;margin:0 0 4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${title}</h3>
+                                    <p style="font-size:12px;color:var(--text-muted);margin:0;">${dateStr} · ${sigCount} ${sigCount === 1 ? 'firma' : 'firmas'}</p>
+                                </div>
+                                <button onclick="window.location.href='?doc=${id}'" class="btn btn-primary" style="flex-shrink:0;font-size:12px;">
+                                    Abrir
+                                    <svg width="12" height="12" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+                                </button>
+                            </div>
+                        `;
+                        dashboardList.appendChild(div);
+                    }
+                });
+                if (!hasDocs) {
+                    dashboardList.innerHTML = `
+                        <div style="text-align:center;padding:40px 16px;background:var(--surface-raised);border-radius:var(--radius);border:1.5px dashed var(--border-strong);">
+                            <svg width="32" height="32" fill="none" stroke="var(--text-muted)" viewBox="0 0 24 24" style="margin:0 auto 10px;display:block;"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+                            <p style="font-size:14px;font-weight:500;color:var(--text-secondary);margin:0 0 4px;">Aún no hay documentos</p>
+                            <p style="font-size:12px;color:var(--text-muted);margin:0;">Crea uno en la pestaña Redactar.</p>
+                        </div>
+                    `;
+                }
+            });
+        }
+
+        // --- SIGNATURE CANVAS ---
+        let isDrawing = false;
+        let hasSignature = false;
+
+        function resizeCanvas() {
+            const ratio = Math.max(window.devicePixelRatio || 1, 1);
+            canvasSig.width = canvasSig.offsetWidth * ratio;
+            canvasSig.height = canvasSig.offsetHeight * ratio;
+            ctxSig.scale(ratio, ratio);
+            ctxSig.lineWidth = 2.5;
+            ctxSig.lineCap = 'round';
+            ctxSig.lineJoin = 'round';
+            ctxSig.strokeStyle = '#1a1a1a';
+        }
+
+        btnStartSign.addEventListener('click', () => {
+            modalSignature.classList.remove('hidden');
+            setTimeout(resizeCanvas, 50);
+        });
+
+        modalBtnClose.addEventListener('click', () => modalSignature.classList.add('hidden'));
+
+        function getPos(e) {
+            const rect = canvasSig.getBoundingClientRect();
+            const src = e.touches ? e.touches[0] : e;
+            return { x: src.clientX - rect.left, y: src.clientY - rect.top };
+        }
+
+        canvasSig.addEventListener('mousedown', (e) => {
+            isDrawing = true;
+            hasSignature = true;
+            modalBtnAccept.disabled = false;
+            const { x, y } = getPos(e);
+            ctxSig.beginPath();
+            ctxSig.moveTo(x, y);
+        });
+
+        canvasSig.addEventListener('mousemove', (e) => {
+            if (!isDrawing) return;
+            const { x, y } = getPos(e);
+            ctxSig.lineTo(x, y);
+            ctxSig.stroke();
+            ctxSig.beginPath();
+            ctxSig.moveTo(x, y);
+        });
+
+        canvasSig.addEventListener('mouseup', () => { isDrawing = false; ctxSig.beginPath(); });
+        canvasSig.addEventListener('mouseleave', () => { isDrawing = false; ctxSig.beginPath(); });
+
+        canvasSig.addEventListener('touchstart', (e) => {
+            e.preventDefault();
+            isDrawing = true;
+            hasSignature = true;
+            modalBtnAccept.disabled = false;
+            const { x, y } = getPos(e);
+            ctxSig.beginPath();
+            ctxSig.moveTo(x, y);
+        }, { passive: false });
+
+        canvasSig.addEventListener('touchmove', (e) => {
+            e.preventDefault();
+            if (!isDrawing) return;
+            const { x, y } = getPos(e);
+            ctxSig.lineTo(x, y);
+            ctxSig.stroke();
+            ctxSig.beginPath();
+            ctxSig.moveTo(x, y);
+        }, { passive: false });
+
+        canvasSig.addEventListener('touchend', () => { isDrawing = false; ctxSig.beginPath(); });
+
+        modalBtnClear.addEventListener('click', () => {
+            ctxSig.clearRect(0, 0, canvasSig.width, canvasSig.height);
+            hasSignature = false;
+            modalBtnAccept.disabled = true;
+        });
+
+        modalBtnAccept.addEventListener('click', () => {
+            if (!hasSignature) return;
+            dragSig.src = canvasSig.toDataURL('image/png');
+            if (currentDocData?.type === 'pdf') {
+                const previewImage = new Image();
+                previewImage.onload = () => {
+                    const page = Number(pdfPageLayers[pdfPageLayers.length - 1]?.dataset.page || 1);
+                    const layer = getPdfPageLayer(page);
+                    const size = getDefaultPdfSignatureSize(previewImage.naturalWidth, previewImage.naturalHeight, layer);
+                    activePdfSignature = {
+                        image: dragSig.src,
+                        page,
+                        x: Math.max(0, (1 - size.width) / 2),
+                        y: Math.max(0, 1 - size.height - 0.08),
+                        width: size.width,
+                        height: size.height,
+                        userId: currentUser?.uid,
+                        timestamp: new Date().toISOString()
+                    };
+                    renderActivePdfSignature();
+                };
+                previewImage.src = dragSig.src;
+            } else {
+                dragSig.style.display = 'block';
+                const centerLeft = Math.max(0, (docWrapper.clientWidth - dragSig.offsetWidth) / 2);
+                dragSig.style.left = `${centerLeft}px`;
+                dragSig.style.top = `${docWrapper.offsetHeight - dragSig.offsetHeight - 80}px`;
+            }
+            window.scrollTo({ top: document.body.scrollHeight, behavior: 'smooth' });
+            modalSignature.classList.add('hidden');
+            setBottomBarState('signing');
+        });
+
+        btnCancelSign.addEventListener('click', () => {
+            dragSig.style.display = 'none';
+            activePdfSignature = null;
+            document.querySelectorAll('.placed-signature.is-active').forEach(node => node.remove());
+            setBottomBarState('default');
+        });
+
+        // Drag signature
+        let isDraggingSig = false;
+        let startX, startY, initialSigLeft, initialSigTop;
+
+        function startDrag(e) {
+            if (currentDocData?.type === 'pdf') return;
+            if (e.target !== dragSig) return;
+            isDraggingSig = true;
+            e.preventDefault();
+            const src = e.touches ? e.touches[0] : e;
+            startX = src.clientX;
+            startY = src.clientY;
+            initialSigLeft = dragSig.offsetLeft;
+            initialSigTop = dragSig.offsetTop;
+        }
+
+        function stopDrag() { isDraggingSig = false; }
+
+        function drag(e) {
+            if (currentDocData?.type === 'pdf') return;
+            if (!isDraggingSig) return;
+            e.preventDefault();
+            const src = e.touches ? e.touches[0] : e;
+            const dx = src.clientX - startX;
+            const dy = src.clientY - startY;
+            const maxL = docWrapper.clientWidth - dragSig.offsetWidth;
+            const maxT = docWrapper.offsetHeight - dragSig.offsetHeight;
+            dragSig.style.left = `${Math.max(0, Math.min(initialSigLeft + dx, maxL))}px`;
+            dragSig.style.top = `${Math.max(0, Math.min(initialSigTop + dy, maxT))}px`;
+        }
+
+        docWrapper.addEventListener('mousedown', startDrag);
+        window.addEventListener('mouseup', stopDrag);
+        window.addEventListener('mousemove', drag);
+        docWrapper.addEventListener('touchstart', startDrag, { passive: false });
+        window.addEventListener('touchend', stopDrag);
+        window.addEventListener('touchmove', drag, { passive: false });
+
+        function findSignatureLayerAtPoint(clientX, clientY) {
+            const elements = document.elementsFromPoint(clientX, clientY);
+            for (const element of elements) {
+                if (element.classList?.contains('signature-layer')) return element;
+            }
+            return null;
+        }
+
+        function startActivePdfSignatureMove(e, element) {
+            if (!activePdfSignature) return;
+            const layer = element.parentElement;
+            if (!layer) return;
+            const rect = element.getBoundingClientRect();
+            const src = e.touches ? e.touches[0] : e;
+            activeSignaturePointer = {
+                mode: e.target.classList.contains('signature-resize-handle') ? 'resize' : 'move',
+                startX: src.clientX,
+                startY: src.clientY,
+                startPage: activePdfSignature.page,
+                startRect: { x: activePdfSignature.x, y: activePdfSignature.y, width: activePdfSignature.width, height: activePdfSignature.height },
+                pointerOffsetX: src.clientX - rect.left,
+                pointerOffsetY: src.clientY - rect.top
+            };
+            e.preventDefault();
+        }
+
+        function moveActivePdfSignature(e) {
+            if (!activePdfSignature || !activeSignaturePointer) return;
+            const src = e.touches ? e.touches[0] : e;
+            const targetLayer = findSignatureLayerAtPoint(src.clientX, src.clientY) || getPdfPageLayer(activePdfSignature.page);
+            if (!targetLayer) return;
+            const layerRect = targetLayer.getBoundingClientRect();
+
+            if (activeSignaturePointer.mode === 'move') {
+                const nextWidth = activePdfSignature.width;
+                const nextHeight = activePdfSignature.height;
+                const nextX = (src.clientX - layerRect.left - activeSignaturePointer.pointerOffsetX) / layerRect.width;
+                const nextY = (src.clientY - layerRect.top - activeSignaturePointer.pointerOffsetY) / layerRect.height;
+                activePdfSignature = {
+                    ...activePdfSignature,
+                    page: Number(targetLayer.dataset.page),
+                    x: Math.min(Math.max(0, nextX), 1 - nextWidth),
+                    y: Math.min(Math.max(0, nextY), 1 - nextHeight)
+                };
+            } else {
+                const start = activeSignaturePointer.startRect;
+                const widthDelta = (src.clientX - activeSignaturePointer.startX) / layerRect.width;
+                const heightDelta = (src.clientY - activeSignaturePointer.startY) / layerRect.height;
+                const nextWidth = Math.min(1 - start.x, Math.max(0.08, start.width + widthDelta));
+                const nextHeight = Math.min(1 - start.y, Math.max(0.04, start.height + heightDelta));
+                activePdfSignature = {
+                    ...activePdfSignature,
+                    width: nextWidth,
+                    height: nextHeight
+                };
+            }
+
+            renderActivePdfSignature();
+            e.preventDefault();
+        }
+
+        function stopActivePdfSignatureMove() {
+            activeSignaturePointer = null;
+        }
+
+        pdfViewerContainer.addEventListener('mousedown', (e) => {
+            const element = e.target.closest('.placed-signature.is-active');
+            if (!element) return;
+            startActivePdfSignatureMove(e, element);
+        });
+        pdfViewerContainer.addEventListener('touchstart', (e) => {
+            const element = e.target.closest('.placed-signature.is-active');
+            if (!element) return;
+            startActivePdfSignatureMove(e, element);
+        }, { passive: false });
+        window.addEventListener('mousemove', moveActivePdfSignature);
+        window.addEventListener('touchmove', moveActivePdfSignature, { passive: false });
+        window.addEventListener('mouseup', stopActivePdfSignatureMove);
+        window.addEventListener('touchend', stopActivePdfSignatureMove);
+
+        // Save signature
+        btnConfirmSave.addEventListener('click', async () => {
+            if (!db || !currentDocId || !currentUser) return;
+            if (currentDocData?.type === 'pdf' && !activePdfSignature) {
+                window.showError("Coloca la firma sobre el PDF antes de guardarla.");
+                return;
+            }
+            btnConfirmSave.disabled = true;
+            btnConfirmSave.textContent = 'Guardando…';
+            try {
+                const sigData = currentDocData?.type === 'pdf'
+                    ? {
+                        image: activePdfSignature.image,
+                        page: activePdfSignature.page,
+                        x: activePdfSignature.x,
+                        y: activePdfSignature.y,
+                        width: activePdfSignature.width,
+                        height: activePdfSignature.height,
+                        userId: currentUser.uid,
+                        timestamp: new Date().toISOString()
+                    }
+                    : {
+                        image: dragSig.src,
+                        xPct: (dragSig.offsetLeft / docWrapper.clientWidth) * 100,
+                        yPct: (dragSig.offsetTop / docWrapper.offsetHeight) * 100,
+                        wPct: (dragSig.offsetWidth / docWrapper.clientWidth) * 100,
+                        userId: currentUser.uid,
+                        timestamp: new Date().toISOString()
+                    };
+                const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'shared_docs', currentDocId);
+                await updateDoc(docRef, { signatures: arrayUnion(sigData) });
+                dragSig.style.display = 'none';
+                activePdfSignature = null;
+                ctxSig.clearRect(0, 0, canvasSig.width, canvasSig.height);
+                hasSignature = false;
+                setBottomBarState('default');
+                window.showToast('✓ Firma guardada correctamente');
+            } catch (e) {
+                console.error(e);
+                window.showError("Error al guardar la firma. Intenta de nuevo.");
+            } finally {
+                btnConfirmSave.disabled = false;
+                btnConfirmSave.innerHTML = `<svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> Guardar firma`;
+            }
+        });
+
+        // Share / create document
+        shareLinkBtn.addEventListener('click', async () => {
+            if (!db || !currentUser) return;
+            shareLinkBtn.disabled = true;
+            shareLinkBtn.textContent = 'Generando enlace…';
+            try {
+                let docContentData = '';
+                if (currentCreationMode === 'html') {
+                    docContentData = isHtmlMode ? htmlSource.value : docContent.innerHTML;
+                } else {
+                    if (!pendingPdfBase64) {
+                        window.showError("Sube un PDF antes de continuar.");
+                        throw new Error("PDF faltante");
+                    }
+                    docContentData = pendingPdfBase64;
+                }
+                const docsRef = collection(db, 'artifacts', appId, 'public', 'data', 'shared_docs');
+                const newDoc = await addDoc(docsRef, {
+                    type: currentCreationMode,
+                    content: docContentData,
+                    authorId: currentUser.uid,
+                    status: 'open',
+                    signatures: [],
+                    createdAt: new Date().toISOString()
+                });
+                const appUrl = new URL(window.location.href.split('?')[0]);
+                appUrl.searchParams.set('doc', newDoc.id);
+                await navigator.clipboard.writeText(appUrl.toString());
+                window.showToast('✓ Enlace copiado al portapapeles');
+                shareLinkBtn.innerHTML = `<svg width="15" height="15" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg> ¡Enlace copiado!`;
+                setTimeout(() => {
+                    shareLinkBtn.innerHTML = `<svg width="15" height="15" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z"/></svg> Guardar y compartir`;
+                    shareLinkBtn.disabled = false;
+                }, 4000);
+            } catch (error) {
+                if (error.message !== 'PDF faltante') console.error(error);
+                shareLinkBtn.innerHTML = `Guardar y compartir`;
+                shareLinkBtn.disabled = false;
+            }
+        });
+
+        // Close document
+        btnCloseDocument.addEventListener('click', async () => {
+            if (!db || !currentDocId) return;
+            if (!confirm("Una vez finalizado, nadie más podrá firmar y todos podrán descargar el PDF. ¿Confirmas?")) return;
+            btnCloseDocument.disabled = true;
+            btnCloseDocument.textContent = 'Finalizando…';
+            try {
+                const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'shared_docs', currentDocId);
+                await updateDoc(docRef, { status: 'closed' });
+                window.showToast('Documento finalizado');
+            } catch (e) {
+                window.showError("Error al finalizar el documento.");
+                btnCloseDocument.disabled = false;
+            }
+        });
+
+        // Download PDF
+        btnDownloadPdf.addEventListener('click', async () => {
+            btnDownloadPdf.disabled = true;
+            btnDownloadPdf.textContent = 'Generando PDF…';
+            try {
+                if (currentDocData?.type === 'pdf') {
+                    const sourceBase64 = currentDocData.content || currentPdfBase64;
+                    const base64Str = sourceBase64.split(',')[1];
+                    const binaryStr = atob(base64Str);
+                    const bytes = new Uint8Array(binaryStr.length);
+                    for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
+
+                    const pdfDoc = await window.PDFLib.PDFDocument.load(bytes);
+                    const embedCache = new Map();
+                    const signaturesByPage = (currentDocData.signatures || []).reduce((acc, sig) => {
+                        const pageIndex = Number(sig.page) - 1;
+                        if (pageIndex < 0) return acc;
+                        (acc[pageIndex] ||= []).push(sig);
+                        return acc;
+                    }, {});
+
+                    for (const [pageIndexStr, signatures] of Object.entries(signaturesByPage)) {
+                        const pageIndex = Number(pageIndexStr);
+                        const page = pdfDoc.getPage(pageIndex);
+                        if (!page) continue;
+                        const { width: pageWidth, height: pageHeight } = page.getSize();
+
+                        for (const sig of signatures) {
+                            let embeddedImage = embedCache.get(sig.image);
+                            if (!embeddedImage) {
+                                embeddedImage = sig.image.includes('image/jpeg')
+                                    ? await pdfDoc.embedJpg(sig.image)
+                                    : await pdfDoc.embedPng(sig.image);
+                                embedCache.set(sig.image, embeddedImage);
+                            }
+
+                            const drawWidth = sig.width * pageWidth;
+                            const drawHeight = sig.height * pageHeight;
+                            page.drawImage(embeddedImage, {
+                                x: sig.x * pageWidth,
+                                y: pageHeight - ((sig.y * pageHeight) + drawHeight),
+                                width: drawWidth,
+                                height: drawHeight
+                            });
+                        }
+                    }
+
+                    const outputBytes = await pdfDoc.save();
+                    const blob = new Blob([outputBytes], { type: 'application/pdf' });
+                    const url = URL.createObjectURL(blob);
+                    const link = document.createElement('a');
+                    link.href = url;
+                    link.download = `Documento_Firmado_${Date.now()}.pdf`;
+                    link.click();
+                    URL.revokeObjectURL(url);
+                } else {
+                    const opt = {
+                        margin: 0,
+                        filename: `Documento_Firmado_${Date.now()}.pdf`,
+                        image: { type: 'jpeg', quality: 0.98 },
+                        html2canvas: { scale: 2, useCORS: true, letterRendering: true },
+                        jsPDF: { unit: 'mm', format: 'a4', orientation: 'portrait' }
+                    };
+                    await html2pdf().set(opt).from(docWrapper).save();
+                }
+
+                btnDownloadPdf.innerHTML = `<svg width="16" height="16" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"/></svg> Descargar PDF firmado`;
+                btnDownloadPdf.disabled = false;
+                window.showToast('✓ PDF descargado');
+            } catch (err) {
+                console.error(err);
+                window.showError("Error al generar el PDF.");
+                btnDownloadPdf.innerHTML = `Descargar PDF firmado`;
+                btnDownloadPdf.disabled = false;
+            }
+        });
+
+        window.addEventListener('resize', () => {
+            if (currentCreationMode !== 'pdf' || !currentPdfBase64) return;
+            if (pdfResizeRaf) cancelAnimationFrame(pdfResizeRaf);
+            pdfResizeRaf = requestAnimationFrame(() => renderPdfToDOM(currentPdfBase64));
+        });
+
+    </script>
+</body>
+</html>
