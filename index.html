@@ -831,7 +831,7 @@
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInWithCustomToken, signInAnonymously, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
-        import { getFirestore, collection, addDoc, getDoc, doc, onSnapshot, updateDoc, arrayUnion } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+        import { getFirestore, collection, addDoc, getDoc, doc, onSnapshot, updateDoc, arrayUnion, deleteDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
         // Mostrar pantalla correcta de inmediato sin esperar a Firebase
         const urlParamsInitial = new URLSearchParams(window.location.search);
@@ -1400,10 +1400,13 @@
                                     <h3 style="font-size:14px;font-weight:600;margin:0 0 4px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${title}</h3>
                                     <p style="font-size:12px;color:var(--text-muted);margin:0;">${dateStr} · ${sigCount} ${sigCount === 1 ? 'firma' : 'firmas'}</p>
                                 </div>
-                                <button onclick="window.location.href='?doc=${id}'" class="btn btn-primary" style="flex-shrink:0;font-size:12px;">
-                                    Abrir
-                                    <svg width="12" height="12" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
-                                </button>
+                                <div style="display:flex;gap:8px;flex-shrink:0;align-items:flex-start;">
+                                    ${isAuthor ? `<button onclick="window.deleteDashboardDoc('${id}', this)" class="btn btn-secondary" style="font-size:12px;color:var(--danger);border-color:rgba(220,38,38,0.2);">Eliminar</button>` : ''}
+                                    <button onclick="window.location.href='?doc=${id}'" class="btn btn-primary" style="font-size:12px;">
+                                        Abrir
+                                        <svg width="12" height="12" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+                                    </button>
+                                </div>
                             </div>
                         `;
                         dashboardList.appendChild(div);
@@ -1420,6 +1423,43 @@
                 }
             });
         }
+
+        window.deleteDashboardDoc = async function(docId, buttonEl) {
+            if (!db || !currentUser) return;
+            if (!confirm("Este documento se eliminará para todos y no se puede recuperar. ¿Deseas continuar?")) return;
+
+            const originalHtml = buttonEl?.innerHTML;
+            if (buttonEl) {
+                buttonEl.disabled = true;
+                buttonEl.textContent = 'Eliminando…';
+            }
+
+            try {
+                const docRef = doc(db, 'artifacts', appId, 'public', 'data', 'shared_docs', docId);
+                const docSnap = await getDoc(docRef);
+                if (!docSnap.exists()) {
+                    window.showError("El documento ya no existe.");
+                    return;
+                }
+
+                const data = docSnap.data();
+                if (data.authorId !== currentUser.uid) {
+                    window.showError("Solo el creador puede eliminar este documento.");
+                    return;
+                }
+
+                await deleteDoc(docRef);
+                window.showToast('Documento eliminado');
+            } catch (error) {
+                console.error(error);
+                window.showError("No se pudo eliminar el documento.");
+            } finally {
+                if (buttonEl && document.body.contains(buttonEl)) {
+                    buttonEl.disabled = false;
+                    buttonEl.innerHTML = originalHtml || 'Eliminar';
+                }
+            }
+        };
 
         // --- SIGNATURE CANVAS ---
         let isDrawing = false;
